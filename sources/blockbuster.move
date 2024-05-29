@@ -408,13 +408,9 @@ module admin::blockbuster {
     }
 
 
-
-}
-
-
-    //==============================================================================================
-    // Tests - DO NOT MODIFY
-    //==============================================================================================
+   //==============================================================================================
+// Tests - DO NOT MODIFY
+//==============================================================================================
     #[test]
     public fun test_create_shop_success_create_shop_for_user() {
         let shop_owner = @0xa;
@@ -458,7 +454,7 @@ module admin::blockbuster {
             test_scenario::return_to_sender(scenario, shop_owner_cap);
             test_scenario::return_shared(shop);
         };
-       
+    
         {
             create_shop(shop_owner, test_scenario::ctx(scenario));
         };
@@ -629,7 +625,6 @@ module admin::blockbuster {
         };
         test_scenario::end(scenario_val);
     }
-
 
     #[test]
     public fun test_add_item_success_added_multiple_items() {
@@ -849,7 +844,7 @@ module admin::blockbuster {
             test_scenario::return_to_sender(scenario, shop_owner_cap);
             test_scenario::return_shared(shop);
         };
-    
+
         let tx = test_scenario::next_tx(scenario, shop_owner);
             let expected_events_emitted = 1;
             assert_eq(
@@ -890,13 +885,310 @@ module admin::blockbuster {
             let shop = test_scenario::take_shared<Shop>(scenario);
             let item = test_scenario::take_from_sender<Item>(scenario);
             let inStoreItem = table::borrow(&shop.items, 0);
-            let expected_total_supply = 34;
-            let expected_quantity_purchased = 1;
 
             assert_eq(item.price, expected_price);
             assert_eq(balance::value(&shop.balance), item.price);
             assert_eq(item.renter, renter);
             assert_eq(item.expiry, 86400000);
+            assert_eq(inStoreItem.listed, false);
+
+            assert_eq(
+                vector::length(&test_scenario::ids_for_sender<Item>(scenario)), 
+                1
+            );
+
+            test_scenario::return_shared(shop);
+            test_scenario::return_to_sender(scenario, item);
+        };
+        let tx = test_scenario::end(scenario_val);
+        let expected_events_emitted = 0;
+        assert_eq(
+            test_scenario::num_user_events(&tx),
+            expected_events_emitted
+        );
+    }
+
+    #[test, expected_failure(abort_code = EItemIsNotListed)]
+    public fun test_rent_item_failure_item_is_unlisted() {
+        let shop_owner = @0xa;
+        let renter = @0xb;
+
+        let scenario_val = test_scenario::begin(shop_owner);
+        let scenario = &mut scenario_val;
+
+        {
+            clock::share_for_testing(clock::create_for_testing(test_scenario::ctx(scenario)));
+        };
+        {
+            create_shop(shop_owner, test_scenario::ctx(scenario));
+        };
+        
+        test_scenario::next_tx(scenario, shop_owner);
+        let expected_price = 1000; 
+        {
+            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
+            let shop = test_scenario::take_shared<Shop>(scenario);
+
+            add_item(
+                &mut shop, 
+                &shop_owner_cap,
+                b"title", 
+                b"description", 
+                expected_price, 
+                3,
+                test_scenario::ctx(scenario)
+            );
+
+            test_scenario::return_to_sender(scenario, shop_owner_cap);
+            test_scenario::return_shared(shop);
+        };
+
+        test_scenario::next_tx(scenario, shop_owner);
+        {
+            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
+            let shop = test_scenario::take_shared<Shop>(scenario);
+
+            unlist_item(
+                &mut shop,
+                &shop_owner_cap,
+                0
+            );
+
+            test_scenario::return_to_sender(scenario, shop_owner_cap);
+            test_scenario::return_shared(shop);
+        };
+        
+        test_scenario::next_tx(scenario, renter);
+        {
+            let shop = test_scenario::take_shared<Shop>(scenario);
+            let clock = test_scenario::take_shared<Clock>(scenario);
+            let payment_coin = sui::coin::mint_for_testing<SUI>(
+                expected_price + DEPOSIT, 
+                test_scenario::ctx(scenario)
+            );
+
+            rent_item(
+                &mut shop, 
+                0,
+                1,
+                renter,
+                payment_coin,
+                &clock,
+                test_scenario::ctx(scenario)
+            );
+
+            test_scenario::return_shared(clock);
+            test_scenario::return_shared(shop);
+        };
+        test_scenario::end(scenario_val);
+    }
+
+        #[test, expected_failure(abort_code = EInsufficientPayment)]
+        public fun test_rent_item_failure(){
+                let expected_category = 2;
+            test_scenario::next_tx(scenario, shop_owner);
+            {
+                let shop_owner_cap  = 
+                    test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
+                let shop = test_scenario::take_shared<Shop>(scenario);
+
+                add_item(
+                    &mut shop, 
+                    &shop_owner_cap,
+                    expected_title, 
+                    expected_description, 
+                    expected_price, 
+                    expected_category,
+                    test_scenario::ctx(scenario)
+                );
+
+                test_scenario::return_to_sender(scenario, shop_owner_cap);
+                test_scenario::return_shared(shop);
+            };
+
+            test_scenario::next_tx(scenario, shop_owner);
+            {
+                let expected_item_length = 2;
+                let shop = test_scenario::take_shared<Shop>(scenario);
+                let item = table::borrow(&shop.items, 1);
+
+                assert_eq(table::length(&shop.items), expected_item_length);
+
+                assert_eq(item.title, string::utf8(expected_title));
+                assert_eq(item.description, string::utf8(expected_description));
+                assert_eq(item.price, expected_price);
+                assert_eq(item.category, expected_category);
+                assert_eq(item.listed, true);
+
+                test_scenario::return_shared(shop);
+            };
+        };
+
+        {
+            let expected_title = b"ready player one";
+            let expected_description = b"so freaking awesome";
+            let expected_price = 200000000; // .2 SUI
+            let expected_category = 1;
+            test_scenario::next_tx(scenario, shop_owner);
+            {
+                let shop_owner_cap  = 
+                    test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
+                let shop = test_scenario::take_shared<Shop>(scenario);
+
+                add_item(
+                    &mut shop, 
+                    &shop_owner_cap,
+                    expected_title, 
+                    expected_description, 
+                    expected_price, 
+                    expected_category,
+                    test_scenario::ctx(scenario)
+                );
+
+                test_scenario::return_to_sender(scenario, shop_owner_cap);
+                test_scenario::return_shared(shop);
+            };
+
+            test_scenario::next_tx(scenario, shop_owner);
+            {
+                let expected_item_length = 3;
+
+                let shop = test_scenario::take_shared<Shop>(scenario);
+                let item = table::borrow(&shop.items, 2);
+
+                assert_eq(table::length(&shop.items), expected_item_length);
+
+                assert_eq(item.title, string::utf8(expected_title));
+                assert_eq(item.description, string::utf8(expected_description));
+                assert_eq(item.price, expected_price);
+                assert_eq(item.category, expected_category);
+                assert_eq(item.listed, true);
+
+                test_scenario::return_shared(shop);
+            };
+        };
+
+        test_scenario::end(scenario_val);
+    }
+
+    #[test, expected_failure(abort_code = ENotShopOwner)]
+    public fun test_add_item_failure_wrong_shop_owner_cap() {
+        let user1 = @0xa;
+        let user2 = @0xb;
+
+        let scenario_val = test_scenario::begin(user1);
+        let scenario = &mut scenario_val;
+
+        {
+            create_shop(user2, test_scenario::ctx(scenario));
+            create_shop(user1, test_scenario::ctx(scenario));
+        };
+
+        test_scenario::next_tx(scenario, user2);
+        {
+            let shop_owner_cap_of_user_2  = 
+            test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
+            let shop_of_user_1 = test_scenario::take_shared<Shop>(scenario);
+            
+            add_item(
+                &mut shop_of_user_1, 
+                &shop_owner_cap_of_user_2,
+                b"title", 
+                b"description", 
+                1000000000, // 1 SUI
+                3,
+                test_scenario::ctx(scenario)
+            );
+
+            test_scenario::return_to_sender(scenario, shop_owner_cap_of_user_2);
+            test_scenario::return_shared(shop_of_user_1);
+        };
+        test_scenario::end(scenario_val);
+    }
+
+    #[test]
+    public fun test_rent_item_success_rent_one_item() {
+        let shop_owner = @0xa;
+        let renter = @0xb;
+
+        let scenario_val = test_scenario::begin(shop_owner);
+        let scenario = &mut scenario_val;
+        
+        {
+            clock::share_for_testing(clock::create_for_testing(test_scenario::ctx(scenario)));
+        };
+        {
+            create_shop(shop_owner, test_scenario::ctx(scenario));
+        };
+        
+        test_scenario::next_tx(scenario, shop_owner);
+        let expected_title = b"title";
+        let expected_description = b"description";
+        let expected_price = 1000; 
+        let expected_category = 3;
+        {
+            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
+            let shop = test_scenario::take_shared<Shop>(scenario);
+
+            add_item(
+                &mut shop, 
+                &shop_owner_cap,
+                expected_title, 
+                expected_description, 
+                expected_price, 
+                expected_category,
+                test_scenario::ctx(scenario)
+            );
+
+            test_scenario::return_to_sender(scenario, shop_owner_cap);
+            test_scenario::return_shared(shop);
+        };
+
+        let tx = test_scenario::next_tx(scenario, shop_owner);
+        let expected_events_emitted = 1;
+        assert_eq(
+            test_scenario::num_user_events(&tx),
+            expected_events_emitted
+        );
+
+        test_scenario::next_tx(scenario, renter);
+        {
+            let shop = test_scenario::take_shared<Shop>(scenario);
+            let clock = test_scenario::take_shared<Clock>(scenario);
+            let payment_coin = sui::coin::mint_for_testing<SUI>(
+                expected_price + DEPOSIT, 
+                test_scenario::ctx(scenario)
+            );
+
+            rent_item(
+                &mut shop, 
+                0,
+                1,
+                renter,
+                payment_coin,
+                &clock,
+                test_scenario::ctx(scenario)
+            );
+
+            test_scenario::return_shared(clock);
+            test_scenario::return_shared(shop);
+        };
+
+        let tx = test_scenario::next_tx(scenario, renter);
+        let expected_events_emitted = 1;
+        assert_eq(
+            test_scenario::num_user_events(&tx),
+            expected_events_emitted
+        );
+        {
+            let shop = test_scenario::take_shared<Shop>(scenario);
+            let item = test_scenario::take_from_sender<Item>(scenario);
+            let inStoreItem = table::borrow(&shop.items, 0);
+
+            assert_eq(item.price, expected_price);
+            assert_eq(balance::value(&shop.balance), item.price);
+            assert_eq(item.renter, renter);
+            assert_eq(item.expiry, clock::timestamp_ms(&clock) + 86400000);
             assert_eq(inStoreItem.listed, false);
 
             assert_eq(
@@ -1024,13 +1316,13 @@ module admin::blockbuster {
             test_scenario::return_to_sender(scenario, shop_owner_cap);
             test_scenario::return_shared(shop);
         };
-    
+
         let tx = test_scenario::next_tx(scenario, shop_owner);
-            let expected_events_emitted = 1;
-            assert_eq(
-                test_scenario::num_user_events(&tx),
-                expected_events_emitted
-            );
+        let expected_events_emitted = 1;
+        assert_eq(
+            test_scenario::num_user_events(&tx),
+            expected_events_emitted
+        );
 
         test_scenario::next_tx(scenario, renter);
         {
@@ -1128,698 +1420,8 @@ module admin::blockbuster {
                 test_scenario::ctx(scenario)
             );
 
-            test_scenario::return_shared(shop);
-            test_scenario::return_shared(clock);
-        };
+    test_scenario::return_shared(clock);
+        test_scenario::return_shared(shop);
+    };
 
-        test_scenario::next_tx(scenario, renter);
-        {
-            let coin = test_scenario::take_from_sender<coin::Coin<SUI>>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-            let inStoreItem = table::borrow(&shop.items, 0);
-            
-            assert_eq(coin::value(&coin), DEPOSIT);
-            assert_eq(balance::value(&shop.deposit), 0);
-            assert_eq(inStoreItem.listed, true);
-            test_scenario::return_to_sender(scenario, coin);
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::end(scenario_val);
-    }
-
-    #[test, expected_failure(abort_code = EItemExpired)]
-    public fun test_return_item_failure_expired() {
-        let shop_owner = @0xa;
-        let renter = @0xb;
-
-        let scenario_val = test_scenario::begin(shop_owner);
-        let scenario = &mut scenario_val;
-
-        {
-            clock::share_for_testing(clock::create_for_testing(test_scenario::ctx(scenario)));
-        };
-        {
-            create_shop(shop_owner, test_scenario::ctx(scenario));
-        };
-        
-        test_scenario::next_tx(scenario, shop_owner);
-        let expected_price = 1000; 
-        {
-            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-
-            add_item(
-                &mut shop, 
-                &shop_owner_cap,
-                b"title", 
-                b"description", 
-                expected_price, 
-                3,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap);
-            test_scenario::return_shared(shop);
-        };
-        
-        test_scenario::next_tx(scenario, renter);
-        {
-            let shop = test_scenario::take_shared<Shop>(scenario);
-            let clock = test_scenario::take_shared<Clock>(scenario);
-            let payment_coin = sui::coin::mint_for_testing<SUI>(
-                expected_price + DEPOSIT, 
-                test_scenario::ctx(scenario)
-            );
-
-            rent_item(
-                &mut shop, 
-                0,
-                1,
-                renter,
-                payment_coin,
-                &clock,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_shared(clock);
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, renter);
-        {
-            let shop = test_scenario::take_shared<Shop>(scenario);
-            let item = test_scenario::take_from_sender<Item>(scenario);
-            let clock = test_scenario::take_shared<Clock>(scenario);
-            clock::increment_for_testing(&mut clock, 87000000);
-            return_item(
-                &mut shop, 
-                item,
-                &clock,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_shared(shop);
-            test_scenario::return_shared(clock);
-        };
-
-        test_scenario::next_tx(scenario, renter);
-        {
-            let coin = test_scenario::take_from_sender<coin::Coin<SUI>>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-            assert_eq(coin::value(&coin), DEPOSIT);
-            assert_eq(balance::value(&shop.deposit), 0);
-            test_scenario::return_to_sender(scenario, coin);
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::end(scenario_val);
-    }
-
-    #[test]
-    public fun test_unlist_item_success_unlist_item_with_no_purchases() {
-        let shop_owner = @0xa;
-
-        let scenario_val = test_scenario::begin(shop_owner);
-        let scenario = &mut scenario_val;
-
-        {
-            clock::share_for_testing(clock::create_for_testing(test_scenario::ctx(scenario)));
-        };
-        {
-            create_shop(shop_owner, test_scenario::ctx(scenario));
-        };
-        
-        test_scenario::next_tx(scenario, shop_owner);
-        let expected_price = 1000; 
-        {
-            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-
-            add_item(
-                &mut shop, 
-                &shop_owner_cap,
-                b"title", 
-                b"description", 
-                expected_price, 
-                3,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap);
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, shop_owner);
-        {
-            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-
-            unlist_item(
-                &mut shop,
-                &shop_owner_cap,
-                0
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap);
-            test_scenario::return_shared(shop);
-        };
-        
-        test_scenario::end(scenario_val);
-    }
-
-    #[test, expected_failure(abort_code = ENotShopOwner)]
-    public fun test_unlist_item_failure_wrong_shop_owner_cap() {
-        let user1 = @0xa;
-        let user2 = @0xb;
-
-        let scenario_val = test_scenario::begin(user1);
-        let scenario = &mut scenario_val;
-
-        {
-            create_shop(user2, test_scenario::ctx(scenario));
-            create_shop(user1, test_scenario::ctx(scenario));
-        };
-
-        test_scenario::next_tx(scenario, user1);
-        {
-            let shop_owner_cap_of_user_1  = 
-                test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop_of_user_1 = test_scenario::take_shared<Shop>(scenario);
-            
-            add_item(
-                &mut shop_of_user_1, 
-                &shop_owner_cap_of_user_1,
-                b"title", 
-                b"description", 
-                1000, 
-                3,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap_of_user_1);
-            test_scenario::return_shared(shop_of_user_1);
-        };
-
-        test_scenario::next_tx(scenario, user2);
-        {
-            let shop_owner_cap_of_user_2  = 
-                test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop_of_user_1 = test_scenario::take_shared<Shop>(scenario);
-            let item_index = 0;
-            let item_ref = table::borrow(&shop_of_user_1.items, item_index);
-
-            unlist_item(
-                &mut shop_of_user_1, 
-                &shop_owner_cap_of_user_2,
-                item_ref.index
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap_of_user_2);
-            test_scenario::return_shared(shop_of_user_1);
-        };
-        test_scenario::end(scenario_val);
-    }
-
-    #[test]
-    public fun test_withdraw_from_shop_success_withdraw_full_balance() {
-        let shop_owner = @0xa;
-        let renter = @0xb;
-
-        let scenario_val = test_scenario::begin(shop_owner);
-        let scenario = &mut scenario_val;
-
-        {
-            clock::share_for_testing(clock::create_for_testing(test_scenario::ctx(scenario)));
-        };
-        {
-            create_shop(shop_owner, test_scenario::ctx(scenario));
-        };
-
-        test_scenario::next_tx(scenario, shop_owner);
-        let expected_price = 1000; 
-        {
-            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-
-            add_item(
-                &mut shop, 
-                &shop_owner_cap,
-                b"title", 
-                b"description", 
-                expected_price, 
-                3,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap);
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, renter);
-        {
-            let shop = test_scenario::take_shared<Shop>(scenario);
-            let clock = test_scenario::take_shared<Clock>(scenario);
-            let payment_coin = sui::coin::mint_for_testing<SUI>(
-                expected_price + DEPOSIT, 
-                test_scenario::ctx(scenario)
-            );
-
-            rent_item(
-                &mut shop, 
-                0,
-                1,
-                renter,
-                payment_coin,
-                &clock,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_shared(clock);
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, shop_owner);
-        {
-            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-
-            let withdrawal_amount = balance::value(&shop.balance);
-
-            withdraw_from_shop(
-                &mut shop, 
-                &shop_owner_cap,
-                withdrawal_amount,
-                shop_owner,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap);
-            test_scenario::return_shared(shop);
-        };
-
-        let tx = test_scenario::next_tx(scenario, shop_owner);
-        let expected_events_emitted = 1;
-        assert_eq(
-            test_scenario::num_user_events(&tx),
-            expected_events_emitted
-        );
-
-        {
-            let expected_shop_balance = 0;
-            let shop = test_scenario::take_shared<Shop>(scenario);
-            assert_eq(balance::value(&shop.balance), expected_shop_balance);
-
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, shop_owner);
-        {
-
-            let expected_amount = 1000;
-            let coin = test_scenario::take_from_sender<coin::Coin<SUI>>(scenario);
-            assert_eq(coin::value(&coin), expected_amount);
-
-            test_scenario::return_to_sender(scenario, coin);
-        };
-        test_scenario::end(scenario_val);
-
-    }
-
-    #[test]
-    public fun test_withdraw_from_shop_success_withdraw_full_balance_with_overdue_deposit() {
-        let shop_owner = @0xa;
-        let renter = @0xb;
-
-        let scenario_val = test_scenario::begin(shop_owner);
-        let scenario = &mut scenario_val;
-
-        {
-            clock::share_for_testing(clock::create_for_testing(test_scenario::ctx(scenario)));
-        };
-        {
-            create_shop(shop_owner, test_scenario::ctx(scenario));
-        };
-
-        test_scenario::next_tx(scenario, shop_owner);
-        let expected_price = 1000; 
-        {
-            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-
-            add_item(
-                &mut shop, 
-                &shop_owner_cap,
-                b"title", 
-                b"description", 
-                expected_price, 
-                3,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap);
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, renter);
-        {
-            let shop = test_scenario::take_shared<Shop>(scenario);
-            let clock = test_scenario::take_shared<Clock>(scenario);
-            let payment_coin = sui::coin::mint_for_testing<SUI>(
-                expected_price + DEPOSIT, 
-                test_scenario::ctx(scenario)
-            );
-
-            rent_item(
-                &mut shop, 
-                0,
-                1,
-                renter,
-                payment_coin,
-                &clock,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_shared(clock);
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, shop_owner);
-        {
-            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-            let item = test_scenario::take_from_address<Item>(scenario, renter);
-            let clock = test_scenario::take_shared<Clock>(scenario);
-            clock::increment_for_testing(&mut clock, 86500000);
-            item_expired(
-                &mut shop, 
-                &item,
-                &clock,
-                test_scenario::ctx(scenario)
-            );
-
-            let withdrawal_amount = balance::value(&shop.balance);
-            withdraw_from_shop(
-                &mut shop, 
-                &shop_owner_cap,
-                withdrawal_amount,
-                shop_owner,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap);
-            test_scenario::return_shared(shop);
-            test_scenario::return_shared(clock);
-            test_scenario::return_to_address(renter, item);
-        };
-        
-        test_scenario::next_tx(scenario, shop_owner);
-        {
-            let expected_shop_balance = 0;
-            let shop = test_scenario::take_shared<Shop>(scenario);
-            assert_eq(balance::value(&shop.balance), expected_shop_balance);
-
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, shop_owner);
-        {
-
-            let expected_amount = 1000 + DEPOSIT;
-            let coin = test_scenario::take_from_sender<coin::Coin<SUI>>(scenario);
-            assert_eq(coin::value(&coin), expected_amount);
-
-            test_scenario::return_to_sender(scenario, coin);
-        };
-        test_scenario::end(scenario_val);
-
-    }
-
-    #[test]
-    public fun test_withdraw_from_shop_success_withdraw_partial_balance() {
-        let shop_owner = @0xa;
-        let renter = @0xb;
-        let recipient = @0xc;
-
-        let scenario_val = test_scenario::begin(shop_owner);
-        let scenario = &mut scenario_val;
-
-        {
-            clock::share_for_testing(clock::create_for_testing(test_scenario::ctx(scenario)));
-        };
-        {
-            create_shop(shop_owner, test_scenario::ctx(scenario));
-        };
-
-        test_scenario::next_tx(scenario, shop_owner);
-        let expected_price = 1000; 
-        {
-            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-
-            add_item(
-                &mut shop, 
-                &shop_owner_cap,
-                b"title", 
-                b"description", 
-                expected_price, 
-                3,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap);
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, renter);
-        {
-            let shop = test_scenario::take_shared<Shop>(scenario);
-            let clock = test_scenario::take_shared<Clock>(scenario);
-            let payment_coin = sui::coin::mint_for_testing<SUI>(
-                expected_price + DEPOSIT, 
-                test_scenario::ctx(scenario)
-            );
-
-            rent_item(
-                &mut shop, 
-                0,
-                1,
-                renter,
-                payment_coin,
-                &clock,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_shared(clock);
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, shop_owner);
-        {
-            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-
-            withdraw_from_shop(
-                &mut shop, 
-                &shop_owner_cap,
-                500,
-                recipient,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap);
-            test_scenario::return_shared(shop);
-        };
-
-        let tx = test_scenario::next_tx(scenario, shop_owner);
-        let expected_events_emitted = 1;
-        assert_eq(
-            test_scenario::num_user_events(&tx),
-            expected_events_emitted
-        );
-
-        {
-            let expected_amount_left_over = 500;
-            let shop = test_scenario::take_shared<Shop>(scenario);
-            assert_eq(
-                balance::value(&shop.balance), expected_amount_left_over
-            );
-
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, recipient);
-        {
-
-            let expected_amount = 500;
-            let coin = test_scenario::take_from_sender<coin::Coin<SUI>>(scenario);
-            assert_eq(coin::value(&coin), expected_amount);
-
-            test_scenario::return_to_sender(scenario, coin);
-        };
-        test_scenario::end(scenario_val);
-    }
-
-    #[test, expected_failure(abort_code = ENotShopOwner)]
-    public fun test_withdraw_from_shop_failure_wrong_shop_owner_cap() {
-        let user1 = @0xa;
-        let user2 = @0xb;
-
-        let scenario_val = test_scenario::begin(user1);
-        let scenario = &mut scenario_val;
-
-        {
-            clock::share_for_testing(clock::create_for_testing(test_scenario::ctx(scenario)));
-        };
-        {
-            create_shop(user2, test_scenario::ctx(scenario));
-            create_shop(user1, test_scenario::ctx(scenario));
-        };
-        test_scenario::next_tx(scenario, user1);
-
-        {
-            let shop_owner_cap_of_user_1  = 
-                test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop_of_user_1 = test_scenario::take_shared<Shop>(scenario);
-            
-            add_item(
-                &mut shop_of_user_1, 
-                &shop_owner_cap_of_user_1,
-                b"title", 
-                b"description", 
-                1000, 
-                3,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap_of_user_1);
-            test_scenario::return_shared(shop_of_user_1);
-        };
-        test_scenario::next_tx(scenario, user2);
-
-        {
-            let shop_of_user_1 = test_scenario::take_shared<Shop>(scenario);
-            let clock = test_scenario::take_shared<Clock>(scenario);
-
-            let item_index = 0;
-            let item_ref = table::borrow(&shop_of_user_1.items, item_index);
-            let price = item_ref.price;
-
-            let payment_coin = coin::mint_for_testing<SUI>(
-                price + DEPOSIT, 
-                test_scenario::ctx(scenario)
-            );
-
-            rent_item(
-                &mut shop_of_user_1, 
-                0,
-                1,
-                user2,
-                payment_coin,
-                &clock,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_shared(shop_of_user_1);
-            test_scenario::return_shared(clock);
-        };
-
-        test_scenario::next_tx(scenario, user2);
-        {
-            let shop_owner_cap_of_user_2  = 
-                test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop_of_user_1 = test_scenario::take_shared<Shop>(scenario);
-
-            withdraw_from_shop(
-                &mut shop_of_user_1, 
-                &shop_owner_cap_of_user_2,
-                1000,
-                user1,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap_of_user_2);
-            test_scenario::return_shared(shop_of_user_1);
-        };
-        test_scenario::end(scenario_val);
-    }
-
-    #[test, expected_failure(abort_code = EInvalidWithdrawalAmount)]
-    public fun test_withdraw_from_shop_failure_amount_greater_than_balance() {
-        let shop_owner = @0xa;
-        let renter = @0xb;
-
-        let scenario_val = test_scenario::begin(shop_owner);
-        let scenario = &mut scenario_val;
-
-        {
-            clock::share_for_testing(clock::create_for_testing(test_scenario::ctx(scenario)));
-        };
-        {
-            create_shop(shop_owner, test_scenario::ctx(scenario));
-        };
-
-        test_scenario::next_tx(scenario, shop_owner);
-
-        let expected_price = 1000; 
-
-        {
-            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-
-            add_item(
-                &mut shop, 
-                &shop_owner_cap,
-                b"title", 
-                b"description", 
-                expected_price, 
-                3,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap);
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, renter);
-        {
-            let shop = test_scenario::take_shared<Shop>(scenario);
-            let clock = test_scenario::take_shared<Clock>(scenario);
-            let payment_coin = sui::coin::mint_for_testing<SUI>(
-                expected_price + DEPOSIT, 
-                test_scenario::ctx(scenario)
-            );
-
-            rent_item(
-                &mut shop, 
-                0,
-                1,
-                renter,
-                payment_coin,
-                &clock,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_shared(clock);
-            test_scenario::return_shared(shop);
-        };
-
-        test_scenario::next_tx(scenario, shop_owner);
-        {
-            let shop_owner_cap  = test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
-            let shop = test_scenario::take_shared<Shop>(scenario);
-
-            withdraw_from_shop(
-                &mut shop, 
-                &shop_owner_cap,
-                2000,
-                shop_owner,
-                test_scenario::ctx(scenario)
-            );
-
-            test_scenario::return_to_sender(scenario, shop_owner_cap);
-            test_scenario::return_shared(shop);
-        };
-        test_scenario::end(scenario_val);
-    }
 }
