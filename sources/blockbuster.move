@@ -53,7 +53,7 @@ module admin::blockbuster {
     // Constants - Add your constants here (if any)
     //==============================================================================================
 
-    const DEPOSIT: u64 = 10000000; //10SUI
+    const DEPOSIT: u64 = 10000000; //10 SUI
 
     //==============================================================================================
     // Error codes - DO NOT MODIFY
@@ -66,6 +66,8 @@ module admin::blockbuster {
     const EInvalidPrice: u64 = 6;
     const EInsufficientPayment: u64 = 7;
     const EItemIsNotListed: u64 = 8;
+    const EAlreadyRented: u64 = 9;
+    const EInvalidRecipient: u64 = 10;
 
     //==============================================================================================
     // Module Structs - DO NOT MODIFY
@@ -95,7 +97,7 @@ module admin::blockbuster {
 
     /*
         The shop owner capability struct represents the ownership of a shop. The shop
-        owner capability is a object that is owned by the shop owner and is used to manage the shop.
+        owner capability is an object that is owned by the shop owner and is used to manage the shop.
         @param id - The object id of the shop owner capability object.
         @param shop - The object id of the shop object.
     */
@@ -122,15 +124,16 @@ module admin::blockbuster {
 		price: u64,
 		expiry: u64,
         category: u8,
-        renter: address
-	}
+        renter: address,
+    }
 
     /*
-        The in-store item struct represents an item available for rent in the shop. 
-        @param index - The index of the item in the shop.
+        The item struct represents an item transferred when rented out. 
+        @param id - The object id of the item object.
         @param title - The title of the item.
         @param description - The description of the item.
         @param price - The price of the item (price per each quantity per day).
+        @param expiry - Expiry timestamp
         @param listed - Whether the item is listed. If the item is not listed, it will not be 
             available for rent.
         @param category - The category of the item.
@@ -141,8 +144,8 @@ module admin::blockbuster {
 		description: String,
 		price: u64,
         listed: bool,
-        category: u8
-	}
+        category: u8,
+    }
 
     //==============================================================================================
     // Event structs - DO NOT MODIFY
@@ -150,8 +153,7 @@ module admin::blockbuster {
 
     /*
         Event to be emitted when an item is added to a shop.
-        @param shop_id - The id of the shop object.
-        @param item_index - The index of the item object.
+        @param item - The id of the item object.
     */
     struct ItemAdded has copy, drop {
         shop_id: ID,
@@ -160,8 +162,7 @@ module admin::blockbuster {
 
     /*
         Event to be emitted when an item is rented.
-        @param shop_id - The id of the shop object.
-        @param item_index - The index of the item object.
+        @param item - The id of the item object.
         @param days - The number of days which the item rented.
         @param renter - The address of the renter.
     */
@@ -174,8 +175,7 @@ module admin::blockbuster {
 
     /*
         Event to be emitted when an item is returned.
-        @param shop_id - The id of the shop object.
-        @param item_index - The index of the item object.
+        @param item - The id of the item object.
         @param return_timestamp - The time of the item is returned.
         @param renter - The address of the renter.
     */
@@ -188,8 +188,7 @@ module admin::blockbuster {
 
     /*
         Event to be emitted when an item is expired.
-        @param shop_id - The id of the shop object.
-        @param item_index - The index of the item object.
+        @param item - The id of the item object.
         @param renter - The address of the renter.
     */
     struct ItemExpired has copy, drop {
@@ -200,8 +199,7 @@ module admin::blockbuster {
 
     /*
         Event to be emitted when an item is unlisted.
-        @param shop_id - The id of the shop object.
-        @param item_index - The index of the item object.
+        @param item - The id of the item object.
     */
     struct ItemUnlisted has copy, drop {
         shop_id: ID,
@@ -217,7 +215,7 @@ module admin::blockbuster {
     struct ShopWithdrawal has copy, drop {
         shop_id: ID,
         amount: u64,
-        recipient: address
+        recipient: address,
     }
 
     //==============================================================================================
@@ -239,7 +237,7 @@ module admin::blockbuster {
             deposit: balance::zero(),
             items: table::new<u64, InStoreItem>(ctx),
             item_count: 0,
-            item_added_count: 0
+            item_added_count: 0,
         });
         let shop_owner_cap = ShopOwnerCapability {
             id: object::new(ctx),
@@ -279,7 +277,7 @@ module admin::blockbuster {
             price,
             listed: true,
             category,
-        };
+	    };
         table::add(&mut shop.items, index, item);
         shop.item_added_count = shop.item_added_count + 1;
         event::emit(ItemAdded {
@@ -315,7 +313,7 @@ module admin::blockbuster {
 
     /*
         Rent an item from the shop and emits an ItemRented event. Abort if the item id is
-        invalid, the payment coin is insufficient, if the item is unlisted.
+        invalid, the payment coin is insufficient, or if the item is unlisted.
         @param shop - The shop to rent the item from.
         @param item_index - The item to rent.
         @param days - The number of days to rent the item for.
@@ -337,12 +335,12 @@ module admin::blockbuster {
         let shop_id = sui::object::uid_to_inner(&shop.id);
         let item = table::borrow_mut(&mut shop.items, item_index);
         assert_item_listed(item.listed);
+        assert!(item.renter == address::zero(), EAlreadyRented);
         let total_price = item.price * days + DEPOSIT;
         assert_correct_payment(coin::value(&payment_coin), total_price);
         let coin_balance = coin::into_balance(payment_coin);
         let paid_fee = balance::split(&mut coin_balance, item.price * days);
         balance::join(&mut shop.balance, paid_fee);
-        // paid_deposit = coin_balance
         balance::join(&mut shop.deposit, coin_balance);
         let id = sui::object::new(ctx);
         let rented_item = Item {
@@ -353,8 +351,8 @@ module admin::blockbuster {
             price: item.price,
             expiry: clock::timestamp_ms(clock) + days * 86400000,
             category: item.category,
-            renter: recipient
-        };
+            renter: recipient,
+	    };
         transfer::transfer(rented_item, recipient);
         item.listed = false;
         event::emit(ItemRented {
@@ -367,8 +365,8 @@ module admin::blockbuster {
 
     /*
         Return an item to the shop and emits an ItemReturned event. Abort if the item id is
-        invalid, or if the item is expired. 
-        @param shop - The shop to return the item to.
+        invalid, if the item is expired.
+        @param shop - The shop to rent the item from.
         @param item - The item to return.
         @param clock - Clock module to determine current timestamp.
         @param ctx - The transaction context.
@@ -400,7 +398,7 @@ module admin::blockbuster {
     /*
         Removes an expired item from the shop and emits an ItemExpired event. Abort if the item id is
         invalid.
-        @param shop - The shop to remove the expired item from.
+        @param shop - The shop to rent the item from.
         @param item - The item to return.
         @param clock - Clock module to determine current timestamp.
         @param ctx - The transaction context.
@@ -445,11 +443,12 @@ module admin::blockbuster {
         let balance = balance::value(&shop.balance);
         assert_valid_withdrawal_amount(amount, balance);
         let withdrawal = coin::take(&mut shop.balance, amount, ctx);
+        assert!(recipient != address::zero(), EInvalidRecipient);
         transfer::public_transfer(withdrawal, recipient);
         event::emit(ShopWithdrawal {
             shop_id,
             amount,
-            recipient
+            recipient,
         });
     }
 
@@ -492,7 +491,7 @@ module admin::blockbuster {
     }
 
     fun assert_correct_payment(payment: u64, price: u64) {
-        assert!(payment >= price, EInsufficientPayment);
+        assert!(payment == price, EInsufficientPayment);
     }
 
     fun assert_valid_withdrawal_amount(amount: u64, balance: u64) {
@@ -888,7 +887,7 @@ module admin::blockbuster {
         test_scenario::next_tx(scenario, user2);
         {
             let shop_owner_cap_of_user_2  = 
-            test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
+                test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
             let shop_of_user_1 = test_scenario::take_shared<Shop>(scenario);
             
             add_item(
@@ -946,11 +945,11 @@ module admin::blockbuster {
         };
     
         let tx = test_scenario::next_tx(scenario, shop_owner);
-            let expected_events_emitted = 1;
-            assert_eq(
-                test_scenario::num_user_events(&tx),
-                expected_events_emitted
-            );
+        let expected_events_emitted = 1;
+        assert_eq(
+            test_scenario::num_user_events(&tx),
+            expected_events_emitted
+        );
 
         test_scenario::next_tx(scenario, renter);
         {
@@ -985,8 +984,6 @@ module admin::blockbuster {
             let shop = test_scenario::take_shared<Shop>(scenario);
             let item = test_scenario::take_from_sender<Item>(scenario);
             let in_store_item = table::borrow(&shop.items, 0);
-            let expected_total_supply = 34;
-            let expected_quantity_purchased = 1;
 
             assert_eq(item.price, expected_price);
             assert_eq(balance::value(&shop.balance), item.price);
@@ -1121,11 +1118,11 @@ module admin::blockbuster {
         };
     
         let tx = test_scenario::next_tx(scenario, shop_owner);
-            let expected_events_emitted = 1;
-            assert_eq(
-                test_scenario::num_user_events(&tx),
-                expected_events_emitted
-            );
+        let expected_events_emitted = 1;
+        assert_eq(
+            test_scenario::num_user_events(&tx),
+            expected_events_emitted
+        );
 
         test_scenario::next_tx(scenario, renter);
         {
@@ -1407,7 +1404,7 @@ module admin::blockbuster {
                 &shop_owner_cap_of_user_1,
                 b"title", 
                 b"description", 
-                1000000000, // 1 SUI
+                1000, 
                 3,
                 test_scenario::ctx(scenario)
             );
@@ -1422,12 +1419,11 @@ module admin::blockbuster {
                 test_scenario::take_from_sender<ShopOwnerCapability>(scenario);
             let shop_of_user_1 = test_scenario::take_shared<Shop>(scenario);
             let item_index = 0;
-            let item_ref = table::borrow(&shop_of_user_1.items, item_index);
 
             unlist_item(
                 &mut shop_of_user_1, 
                 &shop_owner_cap_of_user_2,
-                item_ref.index
+                item_index
             );
 
             test_scenario::return_to_sender(scenario, shop_owner_cap_of_user_2);
@@ -1782,7 +1778,7 @@ module admin::blockbuster {
                 &shop_owner_cap_of_user_1,
                 b"title", 
                 b"description", 
-                1000000000, // 1 SUI
+                1000, 
                 3,
                 test_scenario::ctx(scenario)
             );
